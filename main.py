@@ -13,9 +13,9 @@ app = Flask(__name__)
 class S3(object):
     """Example class demonstrating operations on S3"""
 
-    bucket_name = "uat-test"
-    aws_access_key_id = "AKIAU5N5KCYHYTOZSIHI"
-    aws_secret_access_key = 'mGfix1gERT23U18D6e3/NGmgR9FBS6RDfBTJ3+qh'
+    bucket_name = "your bucket"
+    aws_access_key_id = "your key"
+    aws_secret_access_key = 'your access'
 
     def __init__(self, *args, **kwargs):
         region = kwargs.get('region_name', 'ap-south-1')
@@ -93,23 +93,29 @@ def create_watermark(event):
             audio = in_file.audio
             out = uuid.uuid4().hex + 'out' + '.mp4'
 
-            metadata=FFProbe(file_name)
+            metadata = FFProbe(file_name)
 
             for stream in metadata.streams:
                 if stream.is_video():
                     width, height = stream.frame_size()
+            
+            image_metadata = FFProbe('ezgif.com-gif-maker.png')
+            for stream in image_metadata.streams:
+                if stream.is_video():
+                    image_width, image_height = stream.frame_size()
 
             # y=27% , x=54%
-            x = (width / 100) * 54
-            y = (height / 100) * 27
+            # main_w-overlay_w-(main_w*0.01):y=main_h-overlay_h-(main_h*0.01)
+            x = width - image_width - (width*0.01)
+            y = height - image_height - (height*0.01)
             (
             ffmpeg
-            .filter([in_file, overlay_file], 'overlay', x, y)
+            .filter([in_file, overlay_file], 'overlay')
             .output(audio, out)
             .run()
             )
-            s3_instance.upload_file(
-                file_name=out, key=source_key)
+            # s3_instance.upload_file(
+            #     file_name=out, key=source_key)
             
             return {
                 'statusCode': 200,
@@ -126,6 +132,7 @@ def create_watermark(event):
 @app.route("/", methods=['POST'])
 def watermark():
     res = create_watermark(request.json)
+    print(res)
     return jsonify(res)
 
 
