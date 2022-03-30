@@ -1,6 +1,6 @@
 import io
 import json
-from uuid import uuid4
+import os
 import uuid
 from boto3 import client
 import ffmpeg
@@ -14,8 +14,8 @@ class S3(object):
     """Example class demonstrating operations on S3"""
 
     bucket_name = "your bucket"
-    aws_access_key_id = "your key"
-    aws_secret_access_key = 'your access'
+    aws_access_key_id = "your access key id"
+    aws_secret_access_key = 'your secret key'
 
     def __init__(self, *args, **kwargs):
         region = kwargs.get('region_name', 'ap-south-1')
@@ -54,13 +54,10 @@ class S3(object):
 def create_watermark(event):
     try:
         file_name = event.get('file_name', None)
-        # print(file_name)
         source_key = event.get('source_key', None)
-        # print(source_key)
         watermark_key = event.get('watermark_key', None)
-        # print(watermark_key)
 
-        if file_name.endswith('.png') or file_name.endswith('jpg') or file_name.endswith('jpeg'):
+        if file_name.endswith('.png') or file_name.endswith('.jpg') or file_name.endswith('.jpeg'):
             s3_instance = S3()
             source_content_type, source_file = s3_instance.read_to_buffer(
             source_key)
@@ -69,11 +66,11 @@ def create_watermark(event):
             main_image = Image.open(io.BytesIO(source_file))
             watermark_image = Image.open(io.BytesIO(watermark_file))
             width, height = main_image.size
-            watermark = watermark_image.resize(
-                (int(width / 4), int(height / 5)))
-            watermark_width, watermark_height = watermark.size
-            main_image.paste(watermark, (width - watermark_width,
-                                         height - watermark_height), watermark)
+            watermark = watermark_image.thumbnail(
+                (int(width / 3), int(height / 3)), Image.LANCZOS)
+            watermark_width, watermark_height = watermark_image.size
+            main_image.paste(watermark_image, (width - watermark_width,
+                                         height - watermark_height), watermark_image)
             in_mem_file = io.BytesIO()
             main_image.save(in_mem_file, format=main_image.format)
             s3_instance.upload_object(
@@ -87,9 +84,10 @@ def create_watermark(event):
             file_name = uuid.uuid4().hex + '.mp4'
             watermark = uuid.uuid4().hex + '.png'
             s3_instance.download_file(file_name=file_name, key=source_key)
-            # s3_instance.download_file(file_name=watermark, key=watermark_key)
+            s3_instance.download_file(file_name=watermark, key=watermark_key)
             in_file = ffmpeg.input(file_name)
-            overlay_file = ffmpeg.input('ezgif.com-gif-maker.png')
+            overlay_file = ffmpeg.input(watermark)
+            watermark_image = Image.open(watermark)
             audio = in_file.audio
             out = uuid.uuid4().hex + 'out' + '.mp4'
 
@@ -98,30 +96,38 @@ def create_watermark(event):
             for stream in metadata.streams:
                 if stream.is_video():
                     width, height = stream.frame_size()
+
+            # watermark_image = watermark_image.resize(
+            #     size = (int(width / 4), int(height / 4))
+            # )
+            watermark_image.thumbnail((int(width/2), int(height/2)), Image.LANCZOS)
+            watermark_image.save(watermark)
             
-            image_metadata = FFProbe('ezgif.com-gif-maker.png')
+            image_metadata = FFProbe(watermark)
             for stream in image_metadata.streams:
                 if stream.is_video():
                     image_width, image_height = stream.frame_size()
-
-            # y=27% , x=54%
             # main_w-overlay_w-(main_w*0.01):y=main_h-overlay_h-(main_h*0.01)
-            x = width - image_width - (width*0.01)
-            y = height - image_height - (height*0.01)
+            final_width = width*0.01
+            final_height = height*0.01
+            x = width - image_width - final_width
+            y = height - image_height - final_height
             (
             ffmpeg
-            .filter([in_file, overlay_file], 'overlay')
+            .filter([in_file, overlay_file], 'overlay', x, y)
             .output(audio, out)
             .run()
             )
-            # s3_instance.upload_file(
-            #     file_name=out, key=source_key)
-            
+            s3_instance.upload_file(
+                file_name=out, key=source_key)
+            os.remove(file_name)
+            os.remove(watermark)
+            os.remove(out)
+
             return {
                 'statusCode': 200,
                 'body': {"status": "true", "message": "logo pasted successfully"}
             }
-
     except Exception as e:
         return {
             'statusCode': 500,
