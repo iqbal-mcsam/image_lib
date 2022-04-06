@@ -1,21 +1,44 @@
 import io
-import json
 import os
 import uuid
 from boto3 import client
 import ffmpeg
 from ffprobe import FFProbe
 from PIL import Image
+from flask_mail import Mail, Message
 from flask import Flask, request, jsonify
+import logging
+
 app = Flask(__name__)
+app.config['MAIL_SERVER']='server'
+app.config['MAIL_PORT'] = 2525
+app.config['MAIL_USERNAME'] = 'your-user-name'
+app.config['MAIL_PASSWORD'] = 'your-password'
+app.config['MAIL_USE_TLS'] = False
+app.config['MAIL_USE_SSL'] = False
+mail = Mail(app)
 
 
+log_level = logging.INFO
+ 
+for handler in app.logger.handlers:
+    app.logger.removeHandler(handler)
+
+root = os.path.dirname(os.path.abspath(__file__))
+logdir = os.path.join(root, 'logs')
+if not os.path.exists(logdir):
+    os.mkdir(logdir)
+log_file = os.path.join(logdir, 'app.log')
+handler = logging.FileHandler(log_file)
+handler.setLevel(log_level)
+app.logger.addHandler(handler)
+app.logger.setLevel(log_level)
 class S3(object):
     """Example class demonstrating operations on S3"""
 
     bucket_name = "your bucket"
-    aws_access_key_id = "your access key id"
-    aws_secret_access_key = 'your secret key'
+    aws_access_key_id = "your key"
+    aws_secret_access_key = 'your secret'
 
     def __init__(self, *args, **kwargs):
         region = kwargs.get('region_name', 'ap-south-1')
@@ -54,8 +77,11 @@ class S3(object):
 def create_watermark(event):
     try:
         file_name = event.get('file_name', None)
+        app.logger.info(file_name)
         source_key = event.get('source_key', None)
+        app.logger.info(source_key)
         watermark_key = event.get('watermark_key', None)
+        app.logger.info(watermark_key)
 
         if file_name.endswith('.png') or file_name.endswith('.jpg') or file_name.endswith('.jpeg'):
             s3_instance = S3()
@@ -129,6 +155,10 @@ def create_watermark(event):
                 'body': {"status": "true", "message": "logo pasted successfully"}
             }
     except Exception as e:
+        app.logger.error(str(e))
+        msg = Message('This is from floppyshare', sender = 'iqbal', recipients = ['iqbal@webinfomart.com'])
+        msg.body = str(e)
+        mail.send(msg)
         return {
             'statusCode': 500,
             'body': {"status": "false", "message": str(e)}
@@ -138,7 +168,6 @@ def create_watermark(event):
 @app.route("/", methods=['POST'])
 def watermark():
     res = create_watermark(request.json)
-    print(res)
     return jsonify(res)
 
 
